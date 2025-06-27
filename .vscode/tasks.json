@@ -1,0 +1,13 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run Discord Bot",
+      "type": "shell",
+      "command": "C:/Users/USER/OneDrive/Desktop/discord server bot/.venv/Scripts/python.exe",
+      "args": ["bot.py"],
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}

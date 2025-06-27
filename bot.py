@@ -20,8 +20,26 @@ def get_queue(ctx):
     return guild_queues.setdefault(ctx.guild.id, [])
 
 @bot.command()
-async def play(ctx, url: str):
+async def play(ctx, *, query: str):
     queue = get_queue(ctx)
+    # Check if input is a URL
+    if query.startswith('http://') or query.startswith('https://'):
+        url = query
+        title = url
+    else:
+        # Search YouTube for the query and get the first result
+        ydl_opts = {'format': 'bestaudio', 'noplaylist': True, 'quiet': True, 'default_search': 'ytsearch1'}
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(query, download=False)
+                if 'entries' in info and info['entries']:
+                    info = info['entries'][0]
+                url = info['webpage_url']
+                title = info.get('title', url)
+                await ctx.send(f"Found: [{title}]({url})\nAdding to queue...")
+        except Exception:
+            await ctx.send("No results found for your search.")
+            return
     queue.append(url)
     if not ctx.voice_client or not ctx.voice_client.is_playing():
         await _play_next(ctx)
@@ -38,14 +56,25 @@ async def _play_next(ctx):
         await ctx.send("You must be in a voice channel to use this command.")
         return
     channel = ctx.author.voice.channel if ctx.author.voice else ctx.voice_client.channel
-    if ctx.voice_client is None:
-        await channel.connect()
-    elif ctx.voice_client.channel != channel:
-        await ctx.voice_client.move_to(channel)
+    try:
+        if ctx.voice_client is None:
+            await channel.connect()
+        elif ctx.voice_client.channel != channel:
+            await ctx.voice_client.move_to(channel)
+    except Exception:
+        await ctx.send("Failed to join the voice channel.")
+        return
     ydl_opts = {'format': 'bestaudio', 'noplaylist': True, 'quiet': True}
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        audio_url = info['url']
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            audio_url = info['url']
+            title = info.get('title', url)
+    except Exception:
+        await ctx.send("Failed to retrieve audio stream.")
+        queue.pop(0)
+        await _play_next(ctx)
+        return
     source = FFmpegPCMAudio(audio_url)
     def after_playing(e=None):
         queue.pop(0)
@@ -56,7 +85,23 @@ async def _play_next(ctx):
             pass
     ctx.voice_client.stop()
     ctx.voice_client.play(source, after=after_playing)
-    await ctx.send(f'Now playing: {info.get("title", url)}')
+    await ctx.send(f'Now playing: [{title}]({url})')
+
+@bot.command()
+async def nowplaying(ctx):
+    queue = get_queue(ctx)
+    if queue:
+        url = queue[0]
+        ydl_opts = {'format': 'bestaudio', 'noplaylist': True, 'quiet': True}
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                title = info.get('title', url)
+        except Exception:
+            title = url
+        await ctx.send(f'Now playing: [{title}]({url})')
+    else:
+        await ctx.send("Nothing is currently playing.")
 
 @bot.command()
 async def pause(ctx):
@@ -88,7 +133,7 @@ async def queue(ctx):
     if not queue:
         await ctx.send("Queue is empty.")
     else:
-        msg = '\n'.join(f"{i+1}. {url}" for i, url in enumerate(queue))
+        msg = '\n'.join(f"{i+1}. {'[Now Playing] ' if i==0 else ''}{url}" for i, url in enumerate(queue))
         await ctx.send(f"Current queue:\n{msg}")
 
 @bot.command()
